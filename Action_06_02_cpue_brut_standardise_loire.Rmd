@@ -1,0 +1,1278 @@
+---
+title: "Modélisation Loire"
+author: "Lola Hermann"
+date: "2026-08-24"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    collapsed: false
+    smooth_scroll: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+```
+```{r, echo = FALSE, results='hide'}
+options(width = 200)
+getOption("width")
+```
+```{css, echo = FALSE}
+/* ===== Réglages généraux ===== */
+html, body {
+  width: 100%;
+  max-width: none;
+}
+
+body {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Conteneur principal */
+.main-container,
+.container,
+.container-fluid {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* ===== TOC flottant ===== */
+.tocify {
+  left: 5px !important;
+  width: 200px !important;
+}
+
+/* Espace réservé au contenu principal */
+.toc-content {
+  margin-left: 220px !important;
+  width: calc(100% - 230px) !important;
+  max-width: none !important;
+}
+
+/* ===== En-têtes ===== */
+h1, h2, h3, .rmd-title {
+  margin-top: 0 !important;
+  margin-bottom: 6px !important;
+  padding-top: 0 !important;
+}
+
+/* ===== Onglets principaux ===== */
+.tabset,
+.rmd-tabset {
+  border: none;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Barre d'onglets principale */
+.tabset > .nav,
+.rmd-tabset > .nav {
+  position: sticky;
+  top: 0;
+  background: white;
+  z-index: 1000;
+  border-bottom: 2px solid #007bff;
+  margin: 0 !important;
+  padding: 4px 0 !important;
+}
+
+/* Style des onglets principaux */
+.tabset > .nav > li > a {
+  background-color: #e6f0ff;
+  color: #004a99;
+  border: 1px solid #007bff;
+  border-radius: 6px;
+  margin: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.tabset > .nav > li > a:hover {
+  background-color: #cce0ff;
+}
+
+.tabset > .nav > li.active > a {
+  background-color: #007bff;
+  color: white;
+  border-color: #0056b3;
+}
+
+/* Contenu des onglets */
+.tabset > .tab-content,
+.rmd-tabset > .tab-content {
+  flex-grow: 1;
+  min-height: 70vh;
+  overflow-y: auto;
+  padding: 10px 15px 25px 15px !important;
+  margin: 0 !important;
+}
+
+/* ===== Sous-onglets ===== */
+.tabset .tabset > .nav {
+  position: sticky;
+  top: 5px;
+  background: white;
+  z-index: 999;
+  border-bottom: 1px solid #ccc;
+  padding: 2px 0 !important;
+  margin: 0 !important;
+}
+
+/* Style des sous-onglets */
+.tabset .tabset > .nav > li > a {
+  background-color: #f2f2ff !important;
+  color: #003366 !important;
+  border-color: #004a99 !important;
+  border-radius: 6px;
+  margin-right: 4px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.tabset .tabset > .nav > li > a:hover {
+  background-color: #d6e0ff !important;
+}
+
+.tabset .tabset > .nav > li.active > a {
+  background-color: #004a99 !important;
+  color: white !important;
+}
+
+/* Contenu des sous-onglets */
+.tabset .tabset > .tab-content {
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 10px 15px 25px 15px !important;
+  margin-top: 2px !important;
+}
+
+<style>
+h1 {
+  margin-left: 0;
+}
+
+h2 {
+  margin-left: 20px;
+}
+
+h3 {
+  margin-left: 40px;
+}
+
+h4 {
+  margin-left: 60px;
+}
+</style>
+```
+
+<strong><span style="color: #E67E22;">Étape préalable : Charger les packages nécessaires pour les analyes</span></strong> 
+
+Packages 
+```{r packages}
+pacman::p_load(readxl, dplyr, glmmTMB, DHARMa, emmeans, ggplot2, knitr, kableExtra, gt)
+```
+
+<div style="background-color: #007bff; color: white; padding: 12px 20px; border-radius: 10px; font-size: 2em; font-weight: bold; margin-top: 20px; margin-bottom:25px;">Loire</div>
+
+## 1. Préparation et contrôle des données
+<hr style="border: 1px solid #007bff; margin-top: 20px; margin-bottom: 20px;">
+
+### 1.1. Importation
+```{r}
+sacrois <- read.csv("C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/sacrois_2016-2025_licence_combo_ready.csv")
+
+telecap <- read.csv("C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/telecapeche_2014-2025_navire.csv")
+```
+
+### 1.2. Mise en forme
+```{r}
+s1 <- sacrois %>%
+  select(saison, date, pecheur, poids, quartier) %>%
+  filter(is.na(quartier) | quartier != "AY") %>%
+  filter(!(pecheur == "VALLEE Mickaël" & saison == "2018-2019" & poids >= 20)) %>%
+  
+  # Harmonisation des variables
+  mutate(date = as.Date(date),
+         saison = factor(saison),
+         pecheur = factor(pecheur),
+         saison_num = as.numeric(saison),
+         mois = factor(format(date, "%m"),
+                       levels = c("11", "12","01","02","03","04","05", "06","07","08","09","10"))) %>%
+  
+  # Création de la variable saison_mois
+  mutate(saison_mois = factor(paste(saison, mois, sep = "_"))) %>%
+  
+  # Conservation des variables utilisées pour l'analyse
+  select(saison, date, mois, pecheur, poids, saison_mois, saison_num) %>%
+  
+  # Conservation des captures strictement positives
+  filter(poids > 0) %>%
+  group_by(saison, date, mois, saison_mois, pecheur, saison_num) %>%
+summarise(poids = sum(poids, na.rm = TRUE),
+          .groups = "drop") %>%
+  select(saison, date, mois, saison_mois, pecheur, poids, saison_num)
+
+
+
+
+tecap <- telecap %>%
+  mutate(date = as.Date(date),
+         saison = factor(saison),
+         pecheur = factor(pecheur),
+         saison_num = as.numeric(saison),
+         mois = factor(format(date, "%m"),
+                       levels = c("11", "12","01","02","03","04","05", "06","07","08","09","10"))) %>%
+  
+  # Création de la variable saison_mois
+  mutate(saison_mois = factor(paste(saison, mois, sep = "_"))) %>%
+  
+  # Conservation des variables utilisées pour l'analyse
+  select(saison, date, mois, pecheur, poids, saison_mois, saison_num, nom_zone) %>%
+   # Conservation des captures strictement positives
+  filter(poids > 0) %>%
+  group_by(saison, date, mois, saison_mois, pecheur, saison_num, nom_zone) %>%
+summarise(poids = sum(poids, na.rm = TRUE),
+          .groups = "drop") %>%
+  select(saison, date, mois, saison_mois, pecheur, poids, saison_num, nom_zone)
+
+```
+
+### 1.3. Ajout de la zone à sacrois
+```{r}
+tecap1 <- tecap %>%
+  filter(nom_zone %in% c("Loire", "Loire Lot n°15", "Loire Lot n°13", "Loire Lot n°14")) %>%
+  group_by(saison, pecheur, date, nom_zone) %>%
+  summarise(poids = sum(poids, na.rm = TRUE), .groups = "drop")
+
+pecheur_loire <- unique(tecap1$pecheur)
+
+tecap2 <- tecap %>%
+  filter(pecheur %in% pecheur_loire)
+
+
+tecap3 <- tecap2 %>%
+  group_by(pecheur, saison) %>%
+  summarise(
+    nom_zone = paste(unique(nom_zone), collapse = ", "),
+    .groups = "drop")
+
+tecap4 <- tecap3 %>%
+  filter(!(nom_zone %in% c("Baie de Bourgneuf", "Vie", "Lay", "Vie, Baie de Bourgneuf", "Baie de Bourgneuf, Vie")))
+
+tecap5 <- tecap3 %>%
+  filter(nom_zone %in% c("Loire", "Loire Lot n°15"))
+
+tecap6 <- tecap4 %>%
+  filter(!(nom_zone %in% c("Loire", "Loire Lot n°15")))
+```
+
+```{r}
+s1_test <- s1 %>%
+  mutate(date = as.Date(date),
+         id_s1 = row_number())
+
+tecap_test <- tecap %>%
+  mutate(date = as.Date(date)) %>%
+  semi_join(tecap6, by = c("pecheur", "saison"))
+
+s1_multi <- s1_test %>%
+  semi_join(tecap6, by = c("pecheur", "saison"))
+```
+
+```{r}
+corresp_multi <- s1_multi %>%
+  select(id_s1, pecheur, saison, date) %>%
+  inner_join(tecap_test %>%
+      select(pecheur, saison, date, nom_zone),
+    by = c("pecheur", "saison"),
+    suffix = c("_s1", "_tecap")) %>%
+  mutate(ecart_jours = abs(as.numeric(date_s1 - date_tecap)))
+```
+
+```{r}
+date_plus_proche_multi <- corresp_multi %>%
+  arrange(id_s1, ecart_jours, date_tecap) %>%
+  group_by(id_s1) %>%
+  slice(1) %>%
+  ungroup()
+```
+
+### 1.4 Ajout final de la zone
+```{r}
+s2 <- s1 %>%
+  inner_join(tecap5, by = c("pecheur", "saison"))
+
+s3 <- date_plus_proche_multi %>%
+  select(saison, pecheur, date = date_s1, nom_zone)
+
+s3 <- s1 %>%
+  inner_join(s3, by = c("pecheur", "saison", "date"))
+```
+
+```{r}
+s4 <- bind_rows(s2, s3)
+sum(duplicated(s4))
+```
+
+### 1.5. Sélection de la zone Loire
+```{r}
+loire <- s4 %>%
+  filter(!(nom_zone %in% c("Baie de Bourgneuf", "Vie")))
+
+unique(loire$nom_zone)
+```
+### 1.6. Comparaison pecheur Loire tecap et sacrois
+```{r}
+length(unique(tecap1$pecheur))
+length(unique(loire$pecheur))
+```
+```{r}
+setdiff(unique(tecap1$pecheur),
+        unique(loire$pecheur))
+```
+Ajouter les pecheurs present dans telecapeche et absent dans sacrois à sacrois 
+```{r}
+pecheurs_ajout <- c("ARNAUD Freddy",
+                    "BERTHO Denis",
+                    "DARDIS Hervé",
+                    "LE CLANCHE Christophe",
+                    "VIAUD Sébastien")
+
+loire2 <- bind_rows(loire, tecap1 %>%
+    filter(pecheur %in% pecheurs_ajout))
+```
+
+Ajout d'un identifiant pour anonymiser les pêcheurs
+```{r}
+loire3 <- loire2 %>%
+  mutate(pecheur_id = factor(paste0("P", sprintf("%02d", as.integer(factor(pecheur)))))) %>%
+  select(saison, date, mois, saison_mois, pecheur_id, poids, saison_num, nom_zone)
+```
+
+Les sorties sans capture n’ayant pas fait l’objet d’une déclaration systématique par l’ensemble des pêcheurs, elles ne sont pas prises en compte afin de garantir l’homogénéité des données.
+
+### 1.7. Ajout pecheur fluviaux
+```{r}
+fluv <- read.csv("C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/fluviaux_2013-2025.csv")
+
+fluv1 <- fluv %>%
+  filter(!(saison %in% c("2013-2014", "2014-2015", "2015-2016"))) %>%
+  mutate(date = as.Date(date),
+         saison = factor(saison),
+         pecheur_id = factor(identifiant),
+         saison_num = as.numeric(saison),
+         mois = factor(format(date, "%m"),
+                       levels = c("12","01","02","03","04","05", "06","07","08","09","10","11"))) %>%
+  
+  # Création de la variable saison_mois
+  mutate(saison_mois = factor(paste(saison, mois, sep = "_"))) %>%
+  
+  # Conservation des variables utilisées pour l'analyse
+  select(saison, date, mois, pecheur_id, poids, saison_mois, saison_num, nom_zone) %>%
+   # Conservation des captures strictement positives
+  filter(poids > 0) %>%
+  group_by(saison, date, mois, saison_mois, pecheur_id, saison_num, nom_zone) %>%
+summarise(poids = sum(poids, na.rm = TRUE),
+          .groups = "drop") %>%
+  select(saison, date, mois, saison_mois, pecheur_id, poids, saison_num, nom_zone)
+
+fluv2 <- fluv1 %>%
+  count(pecheur_id, date) %>%
+  filter(n > 1)
+
+loire_final <- bind_rows(loire3, fluv1)
+```
+
+```{r}
+# write.csv(loire_final, "C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/Pecheurs_de_Loire.csv")
+```
+
+### 1.8. Contrôle qualité
+<span style="color: #E67E22;"> **Objectif :** Vérifier que les données soient propres pour la suite</span>
+
+```{r}
+# Valeurs manquantes
+colSums(is.na(loire_final))
+
+# Lignes entièrement dupliquées
+sum(duplicated(loire_final))
+
+# Pêcheur × date dupliqués
+loire_final %>%
+  count(pecheur_id, date) %>%
+  filter(n > 1)
+```
+
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+ Aucune valeur manquante n'est observée dans les variables conservées pour l'analyse. Aucune ligne entièrement dupliquée ni aucune combinaison pêcheur × date en doublon n'est observée.</div>
+
+### 1.9. Structure données
+<div style="width: 60%; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px;">
+  <strong>Tableau 1.</strong> Variables du jeu de données (loire) analysé et exemples de valeurs.
+</div>
+<table style="border-collapse: collapse; width: 70%; font-family: Arial, sans-serif;">
+  <thead>
+    <tr style="background-color: #DFF4FF;">
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: left;">Variable</th>
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: left;">Description</th>
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: left;">Exemple</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Saison de pêche</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">2024-2025</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>date</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Date de la sortie de pêche</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">2024-12-15</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>mois</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Mois de la sortie</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">12</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison_mois</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Interaction saison × mois</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">2024-2025_12</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>pecheur_id</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Identifiant anonymisé du pêcheur</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">P01</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>poids</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Masse capturée par sortie (kg)</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">12,5</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison_num</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Numéro de saison (ordre chronologique)</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">9</td>
+    </tr>
+  </tbody>
+</table>
+  
+Une marée correspond à une sortie de pêche réalisée par un pêcheur à une date donnée  
+  
+  
+<div style="width: 60%; margin-top: 30px; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px;">
+  <strong>Tableau 2.</strong> Résumé des données par saison.</div>
+```{r, echo = FALSE}
+# Tableau récapitulatif par saison
+tab_saison <- loire_final %>%
+  mutate(saison = factor(saison, levels = c("2016-2017", "2017-2018", "2018-2019",  "2019-2020", "2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"))) %>%
+  group_by(saison) %>%
+  summarise(`Nb marées` = n(),
+            `Nb pêcheurs` = n_distinct(pecheur_id),
+            `Poids moyen (kg)` = mean(poids),
+            `Médiane (kg)` = median(poids),
+            `Écart-type (kg)` = sd(poids),
+            `Minimum (kg)` = min(poids),
+            `Maximum (kg)` = max(poids),
+            .groups = "drop")
+
+# Ligne totale
+ligne_totale <- loire_final %>%
+  summarise(saison = "Toutes saisons\nconfondues",
+            `Nb marées` = n(),
+            `Nb pêcheurs` = n_distinct(pecheur_id),
+            `Poids moyen (kg)` = mean(poids),
+            `Médiane (kg)` = median(poids),
+            `Écart-type (kg)` = sd(poids),
+            `Minimum (kg)` = min(poids),
+            `Maximum (kg)` = max(poids))
+
+tab_saison <- bind_rows(tab_saison, ligne_totale)
+
+# Affichage esthétique
+tab_saison %>%
+  gt() %>%
+  fmt_number(columns = c(`Poids moyen (kg)`,
+                         `Médiane (kg)`,
+                         `Écart-type (kg)`,
+                         `Minimum (kg)`,
+                         `Maximum (kg)`),
+             decimals = 2,
+             locale = "fr") %>%
+  tab_header(title = md("**Résumé des données par saison**")) %>%
+  tab_options(table.align = "left")%>%
+  tab_style(style = cell_text(align = "center", weight = "bold"),
+    locations = cells_column_labels()) %>%
+  tab_style(style = cell_text(align = "left"), locations = cells_body(columns = saison)) %>%
+  tab_style(style = cell_text(align = "center"),
+            locations = cells_body(columns = c(`Nb marées`,
+                                               `Nb pêcheurs`,
+                                               `Poids moyen (kg)`,
+                                               `Médiane (kg)`,
+                                               `Écart-type (kg)`,
+                                               `Minimum (kg)`,
+                                               `Maximum (kg)`))) %>%
+  tab_style(style = list(cell_fill(color = "#e6f0ff"),
+                         cell_text(weight = "bold", align = "center")),
+            locations = cells_body(rows = saison == "Toutes saisons\nconfondues")) %>%
+  
+  # Effet au survol des lignes
+  opt_css(css = "tbody tr:hover {
+        background-color: #f0f6ff !important;
+      }")
+```
+
+
+<div style="width: 60%; margin-top: 30px; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px;">
+  <strong>Tableau 3.</strong> Structure de l'échantillon.</div>
+```{r}
+loire_final %>%
+  group_by(pecheur_id) %>%
+  summarise(`Nb saisons` = n_distinct(saison),
+            `Nb marées` = n(),
+            .groups = "drop") %>%
+  arrange(`Nb saisons`)
+```
+
+```{r}
+str(loire_final)
+```
+
+#### 1.9.1. Résumé des données : 
+```{r}
+summary(loire_final)
+```
+
+```{r}
+nb_pecheurs_saison <- loire_final %>%
+  group_by(saison) %>%
+  summarise(nb_pecheurs = n_distinct(pecheur_id))
+
+ggplot(nb_pecheurs_saison, aes(x = saison, y = nb_pecheurs, group = 1)) +
+  geom_line(color = "seagreen4", linewidth = 1.2) +
+  geom_point(color = "seagreen4", size = 4) +
+  geom_text(aes(label = nb_pecheurs), size = 5, vjust = -0.8) +
+  geom_vline(xintercept = 2, linetype = "dashed", color = "grey", linewidth = 1) +
+  annotate("text", x = 2.15, y = 105, label = "Création du centre\nde stockage",   hjust = 0, size = 5) +
+ scale_y_continuous(limits = c(60, 110), breaks = seq(60, 110, by = 5)) +
+  labs(title = "Évolution du nombre de pêcheurs par saison - Loire (2016-2025)",
+       x = "Saison",
+       y = "Nombre de pêcheurs") +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 17))
+```
+
+
+
+
+## 2. CPUE nominale
+### 2.1. CPUE moyenne
+```{r}
+cpue_loire <- loire_final %>%
+  group_by(pecheur_id, saison) %>%
+  summarise(capture_totale = sum(poids),
+            effort_total = n(),
+            .groups = "drop") %>%
+  mutate(cpue = capture_totale / effort_total)
+
+cpue_moy_saison <- cpue_loire %>%
+  group_by(saison) %>%
+  summarise(cpue_moyenne = mean(cpue, na.rm = TRUE), 
+            ecart_type = sd(cpue, na.rm = TRUE), n = sum(!is.na(cpue))) %>%
+  mutate(sem = ecart_type / sqrt(n), 
+         ic95 = qt(0.975, df = n - 1) * sem, 
+         ic95_inf = cpue_moyenne - ic95, 
+         ic95_sup = cpue_moyenne + ic95)
+```
+
+```{r}
+ggplot(cpue_moy_saison, aes(x = saison, y = cpue_moyenne)) +
+  geom_errorbar(aes(ymin = ic95_inf, ymax = ic95_sup), width = 0.15) +
+  geom_point(size = 3, color = "seagreen4") +
+  geom_line(group = 1, color = "seagreen4", linewidth = 1.2) +
+  geom_text(aes(label = round(cpue_moyenne, 2)), size = 5, hjust = -0.5, vjust = 0.2) +
+  labs(title = "CPUE moyenne des pêcheurs par saison - Loire (2016-2025)",
+       x = "Saison",
+       y = "CPUE moyenne") +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 17))
+```
+
+### 2.2. CPUE total par saison
+```{r}
+cpue_totale_saison <- loire_final %>%
+  group_by(saison) %>%
+  summarise(capture_totale = sum(poids, na.rm = TRUE), 
+            effort_total = n(), 
+            cpue_totale = capture_totale / effort_total, 
+            ecart_type = sd(poids, na.rm = TRUE)) %>%
+  mutate(sem = ecart_type / sqrt(effort_total), 
+         ic95 = qt(0.975, df = effort_total - 1) * sem, 
+         ic95_inf = cpue_totale - ic95, 
+         ic95_sup = cpue_totale + ic95)
+```
+
+```{r}
+ggplot(cpue_totale_saison, aes(x = saison, y = cpue_totale, group = 1)) +
+  geom_errorbar(aes(ymin = ic95_inf, ymax = ic95_sup), width = 0.15) +
+  geom_line(color = "seagreen4", linewidth = 0.8) +
+  geom_point(color = "seagreen4", size = 3) +
+  geom_text(aes(label = round(cpue_totale, 2)), size = 5, hjust = -0.5, vjust = 0.2) +
+  labs(title = "CPUE totale par saison - Loire (2016-2025)", x = "Saison", y = "CPUE totale") +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 17))
+```
+
+## 3. Description de la variable réponse
+
+<hr style="border: 1px solid #007bff; margin-top: 20px; margin-bottom: 20px;">
+
+### 3.1. Distribution de la variable réponse :
+
+<span style="color: #E67E22;">**Objectif :** caractériser la distribution des captures journalières afin d'orienter le choix de la famille statistique utilisée pour la modélisation.</span>
+
+```{r}
+ggplot(loire_final, aes(x = poids)) +
+  geom_histogram(bins = 40, fill = "seagreen4", color = "black") +
+  labs(title = "Distribution des captures journalières de civelles - Loire (2016-2025)",
+       x = "Masse de civelles capturée par marée (kg)",
+       y = "Nombre de marées") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 17))
+```
+
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+ La distribution des captures est **positive** et **asymétrique à droite**, avec une forte concentration des captures pour les faibles valeurs et quelques captures plus élevées.
+</div>
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+ Cette structure de distribution est compatible avec l'utilisation d'une loi Gamma, adaptée aux variables continues strictement positives et présentant une dispersion croissante avec la moyenne, sous réserve que les diagnostics du modèle confirment l'adéquation de cette distribution.
+</div>
+
+### 3.2. Evolution de la variance en fonction de la valeur moyenne des captures de civelle (kg) pour chaque saison 
+```{r variance moyenne}
+gp2 <- loire_final %>%
+  group_by(saison) %>%
+  summarise(moyenne = mean(poids),
+            variance = var(poids),
+            ecart_type = sd(poids),
+            n = n())
+
+ggplot(gp2, aes(x = moyenne, y = variance, label = saison)) +
+  geom_point() +
+  geom_text(nudge_y = 1) +
+  labs(x = "Moyenne des captures (kg) de chaque saison", 
+       y = "Variance des captures (kg²)",
+       title = "Relation entre la moyenne et la variance") + 
+  theme(axis.text = element_text(size = 13),
+        axis.title = element_text(size = 15))
+```
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+Les saisons présentant les moyennes de captures les plus élevées présentent également une variance plus importante, suggérant une augmentation de la dispersion avec le niveau moyen des captures.
+</div>
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+ Cette relation indique que la dispersion des captures augmente avec leur moyenne. Cette observation est cohérente avec l'hypothèse d'une distribution Gamma, mais ne permet pas, à elle seule, de valider ce choix de distribution.</div>
+ 
+## 4. Exploration des sources de variabilité
+
+<div style="width: 100%; border-top: 2px solid #007bff; margin-top: 10px; margin-bottom: 20px;"></div>
+
+Cette étape vise à caractériser les principales sources de variation des captures et à déterminer la structure des effets à considérer dans le modèle.  
+Les variations entre saisons, entre pêcheurs et au cours de la saison sont examinées séparément. 
+
+### 4.1. Variation des captures entre les saisons
+
+<span style="color: #E67E22;">**Objectif :** déterminer si les captures diffèrent entre les saisons étudiées.</span> 
+
+CPUE total saison
+```{r}
+loire_final %>%
+  group_by(saison) %>%
+  summarise(n = n(),
+            nb_pecheur = n_distinct(pecheur_id),
+            moyenne = mean(poids),
+            variance = var(poids),
+            ecart_type = sd(poids)) %>%
+  kable(digits = 2,
+        col.names = c("Saison", "N", "Nb pêcheurs", "Moyenne", "Variance", "Écart-type")) %>%
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover"))
+```
+
+```{r}
+ggplot(loire_final, aes(x = saison, y = poids)) +
+  geom_jitter(width = 0.15, alpha = 0.3) +
+  geom_boxplot(alpha = 0.4) +
+  labs(x = "Saison",
+       y = "Capture par marée (kg)",
+       title = "Captures de civelles par saison")
+```
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+Les distributions des captures semblent différer entre les saisons, avec notamment des **niveaux moyens plus élevés au cours des dernières saisons**.
+</div>
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+Cette variabilité temporelle justifie l'introduction de la **saison comme effet fixe** dans le modèle car l'objectif est d'estimer et de comparer les captures entre les saisons étudiées. L'effet de la saison sera ensuite évalué statistiquement dans le modèle mixte.
+</div>
+
+### 4.2. Variation des captures entre les pêcheurs
+
+<span style="color: #E67E22;">**Objectif :** caractériser l'hétérogénéité des captures entre pêcheurs et évaluer la nécessité de prendre en compte un effet individuel dans le modèle.</span>
+```{r}
+loire_final %>%
+  group_by(pecheur_id) %>%
+  summarise(n = n(),
+            moyenne = mean(poids),
+            variance = var(poids),
+            ecart_type = sd(poids)) %>%
+  arrange(desc(moyenne)) %>%
+  kable(digits = 2,
+        col.names = c("Pêcheur", "N", "Moyenne", "Variance", "Écart-type"),
+        caption = "Statistiques descriptives du poids des captures par pêcheur") %>%
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover"))
+```
+
+```{r}
+ggplot(loire_final, aes(x = pecheur_id, y = poids)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(x = "Pêcheur",
+       y = "Capture par marée (kg)",
+       title = "Captures de civelles par pêcheur")
+```
+
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+Une variabilité interindividuelle est observée entre les pêcheurs.
+</div>
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+Cette hétérogénéité interindividuelle conduit à considérer le pêcheur comme une source de variabilité à prendre en compte dans la modélisation. Un effet aléatoire associé au pêcheur est donc envisagé afin de tenir compte des différences de niveau moyen de capture entre individus et de la non-indépendance des observations répétées pour un même pêcheur. Cela se présente tel que : **(1 | pecheur_id)**
+</div>
+
+### 4.3. Variation des captures au cours de la saison
+
+<span style="color: #E67E22;">**Objectif :** déterminer si les captures présentent une évolution au cours de la saison et si cette évolution diffère entre les saisons.</span>
+  
+
+<div style="width: 60%; margin-top: 30px; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px;">
+  <strong>Tableau 4.</strong> Poids moyen de capture de civelle par saison.
+</div>
+```{r}
+loire_final %>%
+  group_by(saison, mois) %>%
+  summarise(n = n(),
+            poids_moyen = mean(poids),
+            .groups = "drop") %>%
+  kable(digits = 2,
+        col.names = c("Saison", "Mois", "N", "Poids moyen"),
+        caption = "Poids moyen des captures par saison et par mois") %>%
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover")) %>%
+  scroll_box(height = "400px")
+```
+
+```{r}
+ggplot(loire_final,
+       aes(x = mois,
+           y = poids,
+           group = saison,
+           colour = saison)) +
+  stat_summary(fun = mean, geom = "line") +
+  stat_summary(fun = mean, geom = "point")
+```
+
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+Les profils mensuels semblent différer entre les saisons, ce qui conduit à envisager une interaction entre la saison et le mois. Cette interaction devra être évaluée statistiquement dans un modèle.
+</div>
+
+### 4.4. Variation des captures des pêcheurs par saison
+
+```{r}
+ggplot(loire_final, aes(x = saison, y = poids)) +
+  geom_boxplot() +
+  facet_wrap(~ pecheur_id) +
+  labs(x = "Saison",
+       y = "Capture par marée (kg)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+<div style="background-color:#d0e4f5; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Description</p>
+  
+Les captures moyennes apparaissent plus élevées chez la majorité des pêcheurs de Loire étudié au cours des dernières saisons, notamment entre 2022-2023 et 2024-2025.
+</div>
+
+Cette tendance sera évaluée formellement dans le modèle.
+
+## 5. Spécification des modèles
+
+<hr style="border: 1px solid #007bff; margin-top: 20px; margin-bottom: 20px;">
+
+L'exploration des données a mis en évidence une variable réponse continue **strictement positive et présentant une distribution asymétrique à droite**. Par ailleurs, les captures présentent une variabilité importante entre les saisons et entre les pêcheurs. Plusieurs modèles sont donc formulés afin d'évaluer la contribution de ces différentes sources de variation et d'identifier la structure de modèle la plus adaptée aux données.
+
+La variable réponse correspond au **poids de civelles capturé par sortie de pêche**, exprimé en kilogrammes. Compte tenu de la nature continue et strictement positive des captures ainsi que de leur asymétrie, les modèles considérés reposent d'abord sur une <span style="color: #8A2BE2; background-color: #FFF9C4; padding: 2px 4px;"><strong>distribution Gamma avec une fonction de lien logarithmique</strong></span>. Ceci sera vérifier par la suite à l'aide des résidus afin de voir si ce type de distribution correspond bien aux données.
+
+La <span style="color: #8A2BE2; background-color: #FFF9C4; padding: 2px 4px;"><strong>saison est considérée comme un effet fixe</strong></span>, car l'objectif est d'estimer et de comparer les niveaux de capture entre les différentes saisons étudiées. Les pêcheurs présentent des niveaux moyens de capture différents en raison de facteurs propres à chaque individu (expérience, stratégie de pêche, matériel, secteur fréquenté, conditions d'exploitation, etc.). Afin de tenir compte de cette hétérogénéité individuelle ainsi que de la répétition des captures journalière pour un même pêcheur, un <span style="color: #8A2BE2; background-color: #FFF9C4; padding: 2px 4px;"><strong>effet aléatoire "pêcheur"</strong></span> est introduit dans les modèles.
+  
+Des variables décrivant la position de la marée au cours de la saison, notamment le **mois**, sont également testées afin de déterminer si l'évolution intra-saisonnière des captures apporte une information supplémentaire à l'effet interannuel de la saison.
+
+Les **modèles sont formulés de manière progressive**, en partant d'un modèle nul incluant uniquement l'effet aléatoire du pêcheur, puis en ajoutant successivement la saison et la dynamique intra-saisonnière.
+  
+  
+  
+### 5.1. Distribution et fonction de lien
+
+Les captures journalières étant continues, strictement positives et asymétriques à droite, une distribution Gamma avec un lien logarithmique est utilisée pour les modèles candidats.
+
+Pour une marée $j$ du pêcheur $i$, le modèle général peut s'écrire :
+
+$$
+poids_{ij} \sim \mathrm{Gamma}(\mu_{ij}, \phi)
+$$
+
+avec :
+
+$$
+\log(\mu_{ij}) = \eta_{ij}
+$$
+
+où $\mu_{ij}$ représente le poids moyen attendu et $\phi$ le paramètre de dispersion.
+  
+  
+  
+### 5.2. Structure des effets
+
+La **saison** est introduite comme effet fixe :
+
+$$
+\beta_{\mathrm{saison}}
+$$
+
+afin d'estimer les différences de niveau moyen de capture entre les saisons.
+
+Le **pêcheur** est introduit comme effet aléatoire avec un intercept spécifique :
+
+$$
+b_i \sim \mathcal{N}(0,\sigma^2_{\mathrm{pêcheur}})
+$$
+
+afin de prendre en compte les différences individuelles de niveau moyen de capture et la répétition des marées pour un même pêcheur.
+
+Ainsi, la structure de base des modèles est :
+
+$$
+\log(\mu_{ij}) =
+\beta_0 +
+\beta_{\mathrm{saison}_j} +
+b_i
+$$
+  
+  
+  
+### 5.3. Formulation des modèles candidats
+
+Plusieurs modèles emboîtés sont formulés afin d'évaluer progressivement l'influence des différentes variables explicatives.
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 0 — modèle nul</strong></div>
+
+Le modèle nul constitue le modèle de référence. Un premier sans l'effet pêcheur est réalisé : 
+$$
+poids \sim 1
+$$
+```{r}
+mod0_glm <- glmmTMB(poids ~ 1, data = loire_final, family = Gamma(link = "log"))
+```
+
+
+Un deuxième ne comportant aucun effet fixe explicatif et permet d'estimer uniquement la variabilité entre pêcheurs :
+
+$$
+poids \sim 1 + (1|pêcheur)
+$$
+
+```{r}
+mod0 <- glmmTMB(poids ~ 1 + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+Tester l'effet pêcheur : l'ajout de l'effet aléatoire pêcheur améliore-t-il le modèle ?
+```{r}
+anova(mod0_glm, mod0)
+```
+```{r}
+AIC(mod0_glm, mod0)
+```
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'ajout de l'effet aléatoire pecheur_id améliore très fortement l'ajustement du modèle. Le test du rapport de vraisemblance est hautement significatif et l'AIC diminue de près de 100 points.
+
+Cela indique que les captures présentent une variabilité importante entre les pêcheurs, au-delà de la variabilité résiduelle.
+
+➡️ L'effet aléatoire du pêcheur est donc conservé dans les modèles suivants.
+</div>
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+Cela montre qu'il existe une variabilité importante entre les pêcheurs et que prendre en compte leur identité améliore fortement l'ajustement du modèle.
+</div>
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 1 — effet de la saison</strong></div>
+
+La saison est ensuite ajoutée comme effet fixe afin d'évaluer les différences de captures entre les saisons :
+
+$$
+poids \sim saison + (1|pêcheur)
+$$
+
+```{r}
+mod1 <- glmmTMB(poids ~ saison + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+Ce modèle constitue le **modèle de référence pour l'estimation de l'évolution interannuelle des captures**, sous réserve de sa comparaison avec les autres modèles et de sa validation.
+
+```{r}
+VarCorr(mod1)
+```
+
+L'écart-type estimé de l'effet aléatoire pêcheur est de 0,19 sur l'échelle du lien logarithmique, indiquant une variabilité non négligeable entre pêcheurs.
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 2 — saison et mois</strong></div>
+
+```{r}
+with(loire_final, table(saison, mois))
+```
+
+Le mois est ajouté afin de déterminer si une partie de la variabilité des captures est associée à leur évolution au cours de la saison :
+
+$$
+poids \sim saison + mois + (1|pêcheur)
+$$
+
+```{r}
+mod2 <- glmmTMB(poids ~ saison + mois + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+Le mois est ici considéré comme un effet fixe permettant de tenir compte d'une éventuelle dynamique intra-saisonnière commune aux différentes saisons.
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 3 — interaction saison × mois</strong></div>
+
+Une interaction entre la saison et le mois est ensuite envisagée afin de tester si la dynamique intra-saisonnière des captures diffère selon les saisons :
+
+$$
+poids \sim saison \times mois + (1|pêcheur)
+$$
+
+```{r}
+mod3 <- glmmTMB(poids ~ saison * mois + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+Ce modèle est plus complexe car il permet à l'effet du mois de varier selon la saison. Il nécessite donc d'être interprété avec prudence, notamment lorsque certaines combinaisons saison × mois sont peu représentées.
+
+L'objectif principal de l'étude est d'avior un indice interannuel (intersaison) de recrutement, la variable mois est testée afin de voir si elle améliore réellement le modèle, mais celle-ci ne répond pas à l'objectif principale. 
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 4 — variabilité de la dispersion selon la saison</strong></div>
+
+Enfin, la possibilité d'une variabilité différente des captures selon les saisons est examinée en permettant au paramètre de dispersion de varier avec la saison :
+
+```{r}
+mod4 <- glmmTMB(poids ~ saison + (1 | pecheur_id), dispformula = ~ saison,
+                data = loire_final, family = Gamma(link = "log"))
+```
+
+Ce modèle permet de distinguer une éventuelle évolution de la **moyenne des captures** d'une évolution de leur **variabilité** entre saisons.
+
+L'ensemble de ces modèles constitue un ensemble de modèles candidats. Ils sont comparés dans l'étape suivante afin d'identifier la structure offrant le meilleur compromis entre qualité d'ajustement et complexité.
+
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 5 — modèle linéaire</strong></div>
+
+Les captures augmentent-elles ou diminuent-elles progressivement au fil des saisons ?
+```{r}
+mod5 <- glmmTMB(poids ~ saison_num + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+<div style="background-color:#FCE4EC; padding:6px 12px; border-radius:8px;  margin-top:15px; margin-bottom:10px; width:fit-content;"><strong>Modèle 6 — Modèle quadratique</strong></div>
+
+L'évolution interannuelle suit-elle une tendance courbe plutôt qu'une simple augmentation ou diminution linéaire ?
+```{r}
+mod6 <- glmmTMB(poids ~ saison_num + I(saison_num^2) + (1 | pecheur_id), data = loire_final, family = Gamma(link = "log"))
+```
+
+
+## 6. Comparaison des modèles
+
+<hr style="border: 1px solid #007bff; margin-top: 20px; margin-bottom: 20px;">
+
+Les modèles sont comparés afin d'identifier la structure offrant le meilleur compromis entre qualité d'ajustement et complexité. La comparaison repose principalement sur le critère d'information d'Akaike (AIC), complété lorsque cela est pertinent par des comparaisons de vraisemblance entre modèles emboîtés.
+
+Un AIC plus faible indique un meilleur compromis entre qualité d'ajustement et nombre de paramètres. Pour les modèles emboîtés, une comparaison par test du rapport de vraisemblance peut également être réalisée.
+
+<div style="width: 90%; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px;">
+  <strong>Tableau 3.</strong> Résumé des modèles considérés et des questions associées.
+</div>
+
+<table style="border-collapse: collapse; width: 90%; font-family: Arial, sans-serif; font-size: 14px;">
+  <thead>
+    <tr style="background-color: #DFF4FF;">
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: center;">Modèle</th>
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: left;">Formule</th>
+      <th style="border: 1px solid #B5D9E8; padding: 10px; text-align: left;">Question</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod0_glm</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>1</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Quel est le niveau moyen des captures en l'absence de variable explicative&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod0</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>1 + (1 | pêcheur)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Existe-t-il une variabilité entre pêcheurs&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod1</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison + (1 | pêcheur)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Les captures diffèrent-elles entre saisons&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod2</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison + mois + (1 | pêcheur)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Existe-t-il une dynamique intra-saisonnière générale&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod3</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison * mois + (1 | pêcheur)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">La dynamique intra-saisonnière diffère-t-elle selon les saisons&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod4</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison + (1 | pecheur_id), dispformula = ~ saison</code>  + dispersion variable</td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">La variabilité des captures diffère-t-elle selon les saisons&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod5</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison_num + (1 | pecheur_id)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">Existe-t-il une tendance linéaire des captures au cours des saisons&nbsp;?</td>
+    </tr>
+    <tr>
+      <td style="border: 1px solid #D3D3D3; padding: 8px; text-align: center;"><strong>mod6</strong></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;"><code>saison_num + I(saison_num^2) + (1 | pecheur_id)</code></td>
+      <td style="border: 1px solid #D3D3D3; padding: 8px;">La tendance des captures au cours des saisons est-elle non linéaire&nbsp;?</td>
+    </tr>
+  </tbody>
+</table>
+  
+  
+  
+### 6.1. Comparaison par AIC
+
+Tester l'effet saison : la saison explique-t-elle une partie de la variabilité des captures ?
+```{r}
+anova(mod0, mod1)
+AIC(mod0, mod1)
+```
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'effet de la saison apporte une très forte amélioration du modèle.
+
+La diminution de l'AIC de plus de 420 points est considérable et le test du rapport de vraisemblance est hautement significatif.
+
+➡️ Les niveaux de capture diffèrent significativement selon les saisons.
+</div>
+  
+  
+Tester l'effet mois : l'ajout du mois améliore-t-il le modèle ?
+```{r}
+anova(mod1, mod2)
+AIC(mod1, mod2)
+```
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'ajout du mois améliore significativement le modèle.
+
+Même après avoir pris en compte les différences entre saisons, il existe donc une variation supplémentaire des captures entre les mois.
+
+➡️ Il existe une dynamique intra-saisonnière générale, commune à l'ensemble des saisons dans ce modèle.
+</div>
+  
+  
+Tester l'interaction saison × mois : la dynamique mensuelle est-elle différente selon les saisons ?
+```{r}
+anova(mod2, mod3)
+AIC(mod2, mod3)
+```
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'ajout de l'interaction améliore fortement le modèle. Cela signifie que l'effet du mois n'est pas identique d'une saison à l'autre.
+
+Autrement dit, la dynamique des captures au cours des mois change selon la saison.
+
+➡️ mod3 est nettement préférable à mod2.
+</div>
+  
+  
+Tester la dispersion variable :
+```{r}
+AIC(mod1, mod4)
+anova(mod1, mod4)
+```
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'ajout d'une dispersion variable selon la saison n'améliore pas le modèle.
+
+Au contraire, l'AIC augmente de 7,2 points.
+
+Le test n'est pas significatif :
+
+p = 0,359 > 0,05
+
+Il n'y a donc pas d'évidence statistique que la dispersion des captures diffère entre les saisons.
+
+➡️ mod1 est préféré à mod4.
+</div>
+
+Ce résultat concerne spécifiquement la dispersion conditionnelle du modèle Gamma, et non simplement la variance brute observée des captures.
+  
+  
+Tester la tendance temporelle : une tendance continue entre les saisons décrit-elle mieux les données que des effets de saison catégoriels ?
+```{r}
+anova(mod1, mod5)
+AIC(mod1, mod5)
+```
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+Le modèle avec saison comme variable catégorielle est nettement meilleur que le modèle avec une simple tendance linéaire de saison_num.
+
+Cela signifie que les différences entre saisons ne peuvent pas être correctement résumées par une seule tendance linéaire.
+
+➡️ Il y a bien une évolution au cours des saisons, mais elle n'est pas simplement linéaire.
+  
+ce résultat ne dit pas que la saison n'a pas d'effet. Au contraire, on vient de voir que l'effet saison est très fort. Il dit simplement que cet effet n'est pas bien résumé par une droite.
+</div>
+
+Tester la non-linéarité : l'évolution des captures au cours des saisons est-elle mieux décrite par une relation non linéaire ?
+```{r}
+anova(mod5, mod6)
+AIC(mod5, mod6)
+```
+
+<div style="background-color:#d6f5d6; padding:5px 10px; border-radius:8px; margin-top:5px; margin-bottom:15px;">
+  <p style="font-size:15px; font-weight:bold; margin:0 0 5px 0;">Interprétation</p>
+L'ajout du terme quadratique améliore significativement le modèle.
+
+➡️ Une relation non linéaire décrit donc mieux l'évolution des captures selon saison_num qu'une relation strictement linéaire.
+</div>
+  
+  
+Le modèle avec interaction saison × mois présente le meilleur ajustement selon l'AIC parmi les modèles testés. Cependant, la structure déséquilibrée des données, avec l'absence de certaines combinaisons saison × mois, limite l'estimation de l'ensemble des effets d'interaction.
+
+```{r}
+fixef(mod3)
+```
+
+```{r}
+AIC(mod0, mod1, mod2, mod3, mod4)
+```
+
+## 7. Tester les résidus sur le modèle choisi
+```{r}
+sim <- simulateResiduals(mod2)
+
+plot(sim)
+testUniformity(sim)
+testDispersion(sim)
+testOutliers(sim)
+testQuantiles(sim)
+```
+
+Moyennes estimées par le modèle
+```{r}
+emm_saison <- emmeans(mod2, ~ saison, type = "response")
+
+plot(emm_saison)
+```
+```{r}
+pairs(emm_saison)
+```
+
+```{r}
+emm_df <- as.data.frame(emm_saison)
+
+ggplot(emm_df, aes(x = saison, y = response)) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = asymp.LCL, ymax = asymp.UCL),
+    width = 0.15) +
+  labs(x = "Saison",
+       y = "Capture moyenne estimée (kg)") +
+  theme_minimal()
+```
+
+Graphique comparaison CPUE brute et CPUE standardisée
+```{r}
+cpue_std <- as.data.frame(emm_saison)
+```
+```{r}
+comparaison_cpue <- cpue_moy_saison %>%
+  select(saison, cpue = cpue_moyenne, ic_inf = ic95_inf, ic_sup = ic95_sup) %>%
+  mutate(type = "CPUE brute") %>%
+  bind_rows(cpue_std %>%
+              select(saison, cpue = response, ic_inf = asymp.LCL, ic_sup = asymp.UCL) %>%
+              mutate(type = "CPUE standardisée"))
+```
+
+```{r}
+ggplot(comparaison_cpue, aes(x = saison, y = cpue, group = type, linetype = type)) +
+  geom_errorbar(aes(ymin = ic_inf, ymax = ic_sup), width = 0.15) +
+  geom_line(color = "seagreen4", linewidth = 0.8) +
+  geom_point(size = 3) +
+  labs(title = "Comparaison des CPUE brute et standardisée - Loire (2016-2025)", x = "Saison", y = "CPUE (kg/marée)", linetype = NULL) +
+  theme_classic()
+```
+
+```{r}
+ggplot(comparaison_cpue, aes(x = saison, y = cpue, group = type, linetype = type, shape = type)) +
+  geom_errorbar(aes(ymin = ic_inf, ymax = ic_sup), width = 0.15) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 3, fill = "white") +
+  scale_shape_manual(values = c("CPUE brute" = 21, "CPUE standardisée" = 24)) +
+  labs(title = "Comparaison des CPUE brute et standardisée - Loire (2016-2025)", x = "Saison", y = "CPUE (kg/marée)", linetype = NULL, shape = NULL) +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 17))
+```

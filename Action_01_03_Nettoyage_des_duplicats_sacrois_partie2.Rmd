@@ -1,0 +1,595 @@
+---
+title: "Action 01_03 : Méthode nettoyage des duplicats de sacrois partie 2"
+author: "Lola Hermann"
+date: "2026-05-21"
+output: html_document
+---
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages}
+pacman::p_load(data.table, dplyr, readxl, ggplot2)
+```
+
+```{r Importation des données}
+# SACROIS
+sacrois <- read.csv("C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/sacrois_2016-2025_licence_combo.csv")
+
+s0 <- sacrois %>%
+  select(!X) %>%
+  mutate(date = as.Date(date)) %>%
+  select(immat_combo, nom_navire, pecheur, saison, date, poids) %>%
+  arrange(nom_navire, date)
+
+s0 <- unique(s0)
+
+# Données Télécapêche
+tecap <- read.csv("C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/telecapeche_2014-2025_navire.csv")
+
+t0 <- tecap %>%
+  select(!X) %>%
+  mutate(date = as.Date(date),
+         immat_combo = immat_final) %>%
+  select(immat_combo, nom_navire, pecheur, saison, date, poids, destination)%>%
+  arrange(nom_navire, date)
+```
+
+```{r pecheur communs tecap sacrois}
+t1_1 <- t0 %>%
+  filter(saison %in% s0$saison)
+
+pecheurs_communs <- intersect(unique(s0$pecheur), unique(t1_1$pecheur))
+
+s1 <- s0 %>%
+  filter(pecheur %in% pecheurs_communs)
+
+t1 <- t1_1 %>%
+  filter(pecheur %in% pecheurs_communs)
+
+length(unique(s1$pecheur))
+length(unique(t1$pecheur))
+```
+
+# Préparation générale
+```{r 1 préparation}
+  s1 <- as.data.table(copy(s1))
+  t1 <- as.data.table(copy(t1))
+  
+  s1[, date := as.Date(date)]
+  t1[, date := as.Date(date)]
+  
+  s1[, id := paste(immat_combo, pecheur, saison, sep = "_")]
+  t1[, id := paste(immat_combo, pecheur, saison, sep = "_")]
+  
+  setorder(s1, id, date)
+  setorder(t1, id, date)
+  
+  s1[, declaration_cumule := FALSE]
+```
+
+# Etape 1   Cumulation
+```{r etape 1 paramètres}
+window_max = 10
+tol = 0.1
+time_tol = 5
+```
+
+### 1. Détection cumul
+```{r 1 detec cumul}
+s2 <- copy(s1)
+
+for (w in 2:window_max) {
+    
+    s2[, past_sum :=
+         frollsum(poids, n = w, align = "right", fill = NA), by = id]
+    
+    s2[, past_sum := shift(past_sum, 1, type = "lag"), by = id]
+    
+    s2[!is.na(past_sum) & abs(poids - past_sum) <= tol, declaration_cumule := TRUE]
+  }
+```
+
+### 1. Matching Télécapêche
+```{r 1 matching tecap}
+# Cas cumulés
+s2_cum <- s2[declaration_cumule == TRUE, .(id,
+                                           date,
+                                           poids_s2 = poids,
+                                           start = date - time_tol,
+                                           end   = date + time_tol)]
+
+setkey(s2_cum, id, start, end)
+
+# T1
+t1_match <- t1[, .(id,
+                   date,
+                   poids_t1 = poids,
+                   start = date,
+                   end   = date)]
+
+setkey(t1_match, id, start, end)
+
+# Overlap temporel
+matches_cum <- foverlaps(s2_cum, t1_match, nomatch = 0)
+```
+
+### 1. Analyse des matchs
+```{r 1 analyse des matchs}
+# Match exact
+matches_cum[, exact_match := abs(poids_s2 - poids_t1) <= tol]
+             
+
+# Totaux T1
+t1_total <- t1[, .(total_t1 = sum(poids, na.rm = TRUE)), by = id]
+
+matches_cum <- merge(matches_cum,
+                     t1_total,
+                     by = "id",
+                     all.x = TRUE)
+
+# Match agrégé
+matches_cum[, total_match := abs(total_t1 - poids_s2) <= tol]
+```
+
+### 1. Réintégration dans s2
+```{r 1 reintegration dans s2}
+match_flags_cum <- unique(matches_cum[, .(id,
+                                          date,
+                                          exact_match,
+                                          total_match)])
+
+s2 <- merge(s2,
+            match_flags_cum,
+            by = c("id", "date"),
+            all.x = TRUE)
+
+s2[is.na(exact_match), exact_match := FALSE]
+s2[is.na(total_match), total_match := FALSE]
+```
+
+### 1. Status cumul
+```{r 1 status cumul}
+s2[, status_cumul := fifelse(declaration_cumule & exact_match,
+                             "cumulative_verified_structure",
+                             fifelse(declaration_cumule & total_match,
+                                     "cumulative_verified_total_only",
+                                     fifelse(declaration_cumule,
+                                             "suspect_cumulative",
+                                             "ok")))]
+```
+
+# Etape 2  Répétition
+```{r 2 paramètres}
+repeat_tol <- 10
+weight_tol <- 0
+time_tol <- 5
+```
+
+### 2. Détection répétition
+```{r 2 detec repet}
+s3 <- copy(s2)
+
+s3[, lag_poids := shift(poids), by = id]
+s3[, lag_date  := shift(date), by = id]
+
+s3[, diff_days := as.numeric(date - lag_date)]
+
+s3[, repeated :=
+      !is.na(lag_poids) &
+      abs(poids - lag_poids) <= weight_tol &
+      diff_days >= 1 &
+      diff_days <= repeat_tol]
+```
+
+### 2. Préparation matching
+```{r 2 prepa matching}
+s3_rep <- s3[repeated == TRUE, .(id,
+                                 date,
+                                 poids_s3 = poids,
+                                 start = date - time_tol,
+                                 end   = date + time_tol)]
+
+setkey(s3_rep, id, start, end)
+
+t1_match <- t1[, .(id,
+                   date,
+                   poids_t1 = poids,
+                   start = date,
+                   end   = date)]
+
+setkey(t1_match, id, start, end)
+```
+
+### 2. Matching
+```{r 2 matching}
+matches_rep <- foverlaps(s3_rep, t1_match, nomatch = 0)
+
+matches_rep[, poids_match := abs(poids_s3 - poids_t1) <= weight_tol]
+```
+
+### 2. Réintégration
+```{r 2 réintégration}
+verified_rep <- unique(matches_rep[poids_match == TRUE, .(id, date)])
+
+verified_rep[, verified_repeat := TRUE]
+
+s3 <- merge(s3,
+            verified_rep,
+            by = c("id", "date"),
+            all.x = TRUE)
+
+s3[is.na(verified_repeat), verified_repeat := FALSE]
+```
+
+### 2. Status répétition
+```{r 2 status répét}
+s3[, status_repeat := fifelse(repeated & verified_repeat,
+                              "repeated_but_verified",
+                              fifelse(repeated & !verified_repeat,
+                                      "suspect_repeat",
+                                      "ok"))]
+```
+
+# Etape 3  Tolérance mensuel
+```{r 3 paramètre}
+month_tol <- 5
+```
+
+```{r 3 copie s3}
+s4 <- copy(s3)
+```
+
+### 3. Création variable mois
+```{r 3 ajout mois}
+s4[, month := format(date, "%Y-%m")]
+t1[, month := format(date, "%Y-%m")]
+```
+
+### 3. Agrégation mensuel
+```{r 3 agrégation mensuel}
+s4_month <- s4[, .(poids_s4 = sum(poids, na.rm = TRUE)), by = .(id, month)]
+
+t1_month <- t1[, .(poids_t1 = sum(poids, na.rm = TRUE)), by = .(id, month)]
+```
+
+### 3. Comparaison mensuel
+```{r 3 comparaison mois}
+month_compare <- merge(s4_month, t1_month, by = c("id", "month"), all = TRUE)
+```
+
+### 3. remplacement des Na
+```{r 3 remplacement na}
+month_compare[is.na(poids_s4), poids_s4 := 0]
+month_compare[is.na(poids_t1), poids_t1 := 0]
+```
+
+### 3. calcul ecart
+```{r 3 calcul ecart}
+month_compare[, diff_month := poids_s4 - poids_t1]
+
+month_compare[, abs_diff_month := abs(diff_month)]
+```
+
+### 3. Flag mensuel
+```{r 3 flag}
+month_compare[, month_ok := abs_diff_month <= month_tol]
+
+month_compare[, sacrois_superieur := diff_month > month_tol]
+```
+
+### 3. réintégration dans s4
+```{r 3 réintégration dans s4}
+month_flags <- month_compare[ , .(id,
+                                  month,
+                                  diff_month,
+                                  abs_diff_month,
+                                  month_ok)]
+
+s4 <- merge(s4, month_flags, by = c("id", "month"), all.x = TRUE)
+```
+
+### 3. status mensuel
+```{r 3 status mensuel}
+s4[, status_month := fifelse(month_ok,
+                             "monthly_consistent",
+                             "monthly_inconsistent")]
+```
+
+# Etape 4 Tolérance saisonnière
+```{r 4 paramètres}
+season_tol <- 2
+```
+
+```{r 4 copie s4}
+s5 <- copy(s4)
+```
+
+### 4. Agrégation saisonnière
+```{r 4 agrégation saisonnière}
+s5_season <- s5[, .(poids_s5_season = sum(poids, na.rm = TRUE)), by = id]
+
+t1_season <- t1[, .(poids_t1_season = sum(poids, na.rm = TRUE)), by = id]
+```
+
+### 4. Comparaison saisonnière 
+```{r 4 comparaison saisonnière}
+season_compare <- merge(s5_season, t1_season, by = "id", all = TRUE)
+```
+
+### 4. Transformation des Na
+```{r 4 transfo NA}
+season_compare[is.na(poids_s5_season), poids_s5_season := 0]
+
+season_compare[is.na(poids_t1_season), poids_t1_season := 0]
+```
+
+### 4. Calcul écart 
+```{r 4 calcul écart}
+season_compare[, diff_season := poids_s5_season - poids_t1_season]
+
+season_compare[, abs_diff_season := abs(diff_season)]
+```
+
+### 4. Flags saisonnier
+```{r 4 flags}
+season_compare[, season_ok := abs_diff_season <= season_tol]
+```
+
+### 4. Réintégration dans s5
+```{r 4 reintegration dans s5}
+season_flags <- season_compare[, .(id,
+                                   diff_season,
+                                   abs_diff_season,
+                                   season_ok)]
+
+s5 <- merge(s5, season_flags, by = "id", all.x = TRUE)
+```
+
+### 4. Status saisonnier 
+```{r 4 status saisonnier}
+s5[, status_season := fifelse(season_ok,
+                              "season_consistent",
+                              "season_inconsistent")]
+```
+
+# Etape 5 final
+### 5. Filtration des cas suspect
+```{r 5 filtration des cas suspect}
+suspects <- s5[status_cumul != "ok" |
+                 status_repeat != "ok" |
+                 status_month == "monthly_inconsistent" |
+                 status_season == "season_inconsistent"]
+```
+
+### 5. Ajout d'un score
+```{r}
+s5[, risk_score := 0]
+
+s5[status_cumul == "suspect_cumulative", risk_score := risk_score + 3]
+
+s5[status_repeat == "suspect_repeat", risk_score := risk_score + 2]
+
+s5[status_month == "monthly_inconsistent", risk_score := risk_score + 2]
+
+s5[status_season == "season_inconsistent", risk_score := risk_score + 4]
+```
+
+### 5. Classification
+```{r}
+s5[, final_risk := fifelse(risk_score >= 6, "HIGH",
+                           fifelse(risk_score >= 3, "MEDIUM",
+                                   "LOW"))]
+```
+
+# Etape 6 Supression des déclarations suspectes 
+```{r 6 question}
+s_question <- s5 %>%
+  select(immat_combo, nom_navire, pecheur, saison, date, poids, lag_poids, lag_date, diff_days, status_cumul, status_repeat, status_month, status_season, diff_month, diff_season, risk_score, final_risk)
+
+cumul_pas_ok <- s_question %>%
+  filter(!status_cumul == "ok")
+```
+
+```{r 6 isolations des lignes}
+s6 <- s5[((status_cumul == "suspect_cumulative" & status_month == "monthly_inconsistent" & diff_month > 0 &
+    status_season == "season_inconsistent" & diff_season > 0) |
+    (status_repeat == "suspect_repeat" & status_month == "monthly_inconsistent" & diff_month > 0 & status_season == "season_inconsistent" & diff_season > 0))]
+```
+
+```{r 6 supression des lignes}
+s7 <- s5[!((status_cumul == "suspect_cumulative" & status_month == "monthly_inconsistent" & diff_month > 0 &
+    status_season == "season_inconsistent" & diff_season > 0) |
+    (status_repeat == "suspect_repeat" & status_month == "monthly_inconsistent" & diff_month > 0 & status_season == "season_inconsistent" & diff_season > 0))]
+```
+
+# Etape 7 Comparaison télécapêche et sacrois après
+```{r}
+sum_s1 <- s1 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  group_by(saison, mois) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS avant")
+
+sum_s7 <- s7 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  group_by(saison, mois) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS après")
+
+sum_t1 <- t1 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  group_by(saison, mois) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "Télécapêche")
+
+sum_total <- bind_rows(sum_s1, sum_s7, sum_t1)
+sum_total <- sum_total %>%
+  mutate(mois = factor(mois, 
+                       levels = c("novembre", "décembre", "janvier", "février", 
+                                  "mars", "avril", "mai"))) %>%
+  arrange(saison, mois)
+
+ggplot(sum_total, aes(x=mois, y = poids_tot, color = source, group = source)) + 
+  geom_point() + 
+  geom_line(linewidth = 1.2)  +
+  labs(title = "Comparaison du total de capture selon la source de déclaration pour le même nombre de pêcheur",
+       x = "Mois",
+       y = "Total de captures (kg)",
+       color = "Source") +
+  facet_wrap(~ saison) +
+  theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1, color = "black",
+                                   size = 12),
+        axis.text.y = element_text(color = "black", size = 11),
+        axis.title = element_text(size = 14, face = "bold"),
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 13),
+        strip.text = element_text(size = 14, face = "bold"))
+```
+### 7. Regarder pour les pêcheurs concerné
+```{r}
+pecheur_suspect <- unique(s6$pecheur)
+
+sum_s1_pec <- s1 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, mois, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS avant")
+
+sum_s7_pec <- s7 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, mois, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS après")
+
+sum_t1_pec <- t1 %>%
+  mutate(mois = lubridate::month(date, label = TRUE, abbr = FALSE)) %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, mois, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "Télécapêche")
+
+sum_total2 <- bind_rows(sum_s1_pec, sum_s7_pec, sum_t1_pec)
+sum_total2 <- sum_total2 %>%
+  mutate(mois = factor(mois, 
+                       levels = c("novembre", "décembre", "janvier", "février", 
+                                  "mars", "avril", "mai"))) %>%
+  arrange(pecheur, saison, mois)
+
+g0 <- ggplot(sum_total2, aes(x=mois, y = poids_tot)) + 
+  geom_point(aes(color = pecheur)) +
+  geom_line(aes(color = pecheur, group = pecheur), data = sum_total2 %>% filter(source == "SACROIS avant")) +
+  geom_line(aes(color = pecheur, group = pecheur), linetype = "dotted", data = sum_total2 %>% filter(source == "SACROIS après")) +
+  geom_line(aes(color = pecheur, group = pecheur), linetype = "dashed", data = sum_total2 %>% filter(source == "Télécapêche")) +
+  labs(x = "Mois",
+       y = "Total de captures (kg)",
+       color = "Source") +
+  facet_wrap(~ saison) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black",
+                                   size = 11),
+        axis.text.y = element_text(color = "black", size = 11),
+        axis.title = element_text(size = 12, face = "bold"))
+
+library(plotly)
+
+ggplotly(g0)
+```
+
+```{r}
+pecheur_suspect <- unique(s6$pecheur)
+
+sum_s1_pec_2 <- s1 %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS avant")
+
+sum_s7_pec_2 <- s7 %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "SACROIS après")
+
+sum_t1_pec_2 <- t1 %>%
+  filter(pecheur%in%pecheur_suspect) %>%
+  group_by(saison, immat_combo, nom_navire, pecheur) %>%
+  summarise(poids_tot = sum(poids, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(source = "Télécapêche")
+
+sum_total3 <- bind_rows(sum_s1_pec_2, sum_s7_pec_2, sum_t1_pec_2)
+sum_total3 <- sum_total3 %>%
+  arrange(pecheur, saison)
+
+g1 <- ggplot(sum_total3, aes(x=saison, y = poids_tot)) + 
+  geom_point(aes(color = pecheur)) +
+  geom_line(aes(color = pecheur, group = pecheur), data = sum_total3 %>% filter(source == "SACROIS avant")) +
+  geom_line(aes(color = pecheur, group = pecheur), linetype = "dotted", data = sum_total3 %>% filter(source == "SACROIS après")) +
+  geom_line(aes(color = pecheur, group = pecheur), linetype = "dashed", data = sum_total3 %>% filter(source == "Télécapêche")) +
+  labs(x = "Mois",
+       y = "Total de captures (kg)",
+       color = "Source") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black",
+                                   size = 11),
+        axis.text.y = element_text(color = "black", size = 11),
+        axis.title = element_text(size = 12, face = "bold"))
+
+ggplotly(g1)
+```
+
+
+```{r}
+sac_net <- s7
+
+sac_combo <- sacrois
+
+
+sac_net1 <- sac_net %>%
+  select(saison, date, immat_combo, pecheur, poids)
+
+
+sac_combo1 <- sac_combo %>%
+  select(!X) %>%
+  select(annee, mois, saison, date, immat_combo, navire_combo, pecheur, poids, immat, nom_navire, quartier, stade_anguille_cod)
+
+
+head(sac_net1)
+head(sac_combo1)
+nrow(sac_net1)
+nrow(sac_combo1)
+
+setdiff(names(sac_combo1), names(sac_net1))
+
+
+combo_ref <- sac_combo1 %>%
+  mutate(date = as.Date(date)) %>%
+  select(-poids) %>%
+  distinct(saison, date, immat_combo, pecheur, .keep_all = TRUE)
+
+sac_net1_enriched <- sac_net1 %>%
+  mutate(date = as.Date(date)) %>%
+  left_join(combo_ref,
+            by = c("saison", "date", "immat_combo", "pecheur")) %>%
+  select(annee, mois, saison, date, immat_combo, navire_combo, pecheur, poids, immat, nom_navire, quartier, stade_anguille_cod)
+
+nrow(sac_net1_enriched) == nrow(sac_net1)
+
+names(sac_combo1)
+names(sac_net1_enriched)
+
+write.csv(sac_net1_enriched, "C:/Users/Stagiaire/Desktop/LOLA/STAGE/R/output/sacrois_2016-2025_licence_combo_ready.csv")
+
+```
+
